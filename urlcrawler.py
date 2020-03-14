@@ -4,12 +4,12 @@ import bs4
 import argparse
 from fake_useragent import UserAgent
 import pdb
-try:
-    # python2
+import json
+from json2html import json2html
+try:    # python2
     from urllib.parse import urlparse
-except ImportError:
-    # python3
-     from urlparse import urlparse
+except ImportError: # python3
+    from urlparse import urlparse
 
 class Node:
     def __init__(self):
@@ -113,6 +113,8 @@ def insertData(data):
     node = Node()
     for d in data:
         node.insert(d, None, None)
+    
+    
      
     return node
 
@@ -135,24 +137,35 @@ def showToHTML(url_table):
     f.close()
 
 def nodeToList(node):
-    result = ''
+    result = dict()
+    for index in range(node.getLength()):
+        result[node.getData(index)["url"]] = list()
+    for index in range(node.getLength()):
+        n = node.getData(index)
         
-    for index in range(node.getLength()):
-        # result += node.getData(index)["url"] + "       " + str(node.getData(index)["status_code"]) + "\n"
-        result += node.getData(index)["url"] + "\n\n"
-    for index in range(node.getLength()):
-        link = node.getData(index)['link']
-        if link is not None:
-            result += nodeToList(link)
+        if n["link"] is not None:
+            result[n["url"]].append(nodeToList(n["link"]))
     
     return result
+    
+    # result = ''
+        
+    # for index in range(node.getLength()):
+    #     # result += node.getData(index)["url"] + "       " + str(node.getData(index)["status_code"]) + "\n"
+    #     result += node.getData(index)["url"] + "\n\n"
+    # for index in range(node.getLength()):
+    #     link = node.getData(index)['link']
+    #     if link is not None:
+    #         result += nodeToList(link)
+    
+    # return result
     
 def nodeTravel(node, bs, arg, url_table, count, max_depth):
     if count < max_depth:
         for index in range(node.getLength()):
             d = node.getData(index)
             parsed_uri_1 = urlparse(d["url"]).netloc
-            parsed_uri_2 = urlparse(user_url).netloc
+            parsed_uri_2 = urlparse(arg.url).netloc
             
             # Ohter domain do not crawl.
             if parsed_uri_1 != parsed_uri_2:
@@ -169,6 +182,7 @@ def nodeTravel(node, bs, arg, url_table, count, max_depth):
             node_link, url_table = url_parser(bs, arg, url_table)
             node.modifyData(index, "link", node_link)
             node.modifyData(index, "status_code", status_code)
+            
         
         for index in range(node.getLength()):
             link = node.getData(index)["link"]
@@ -176,11 +190,10 @@ def nodeTravel(node, bs, arg, url_table, count, max_depth):
             if link is not None:
                 count += 1 
                 nodeTravel(link, bs, arg, url_table, count, max_depth)
-    
+
 if __name__ == "__main__":
     url_table = list()
     arg = command_parser()
-    user_url = arg.url
     
     header = ''
     
@@ -200,10 +213,11 @@ if __name__ == "__main__":
     max_depth = arg.depth
     
     nodeTravel(root, bs, arg, url_table, 0, max_depth)
-        
-    result = nodeToList(root)
-    showToHTML(result)
     
-    f = open("./test.txt", "a")
-    f.write("\n".join(url_table))
+    result = nodeToList(root)
+    result = json2html.json2html(result, 1)
+    
+    
+    f = open("result.html", "w")
+    f.write(result)
     f.close()
