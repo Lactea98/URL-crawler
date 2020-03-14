@@ -3,6 +3,7 @@ import requests
 import bs4
 import argparse
 from fake_useragent import UserAgent
+import pdb
 try:
     # python2
     from urllib.parse import urlparse
@@ -11,9 +12,10 @@ except ImportError:
      from urlparse import urlparse
 
 class Node:
-    pNode = None
-    data = list()
-    count = 0
+    def __init__(self):
+        self.pNode = None
+        self.data = list()
+        self.count = 0
     
     def previous_node(self):
         return self.pNode
@@ -26,18 +28,24 @@ class Node:
         return self.count
     def modifyData(self, index, key, value):
         self.data[index][key] = value
-
+        
 def command_parser():
     parser = argparse.ArgumentParser(description = "URL crawler")
     
     parser.add_argument("--url", required=True, help="Input url or --url [Parent url] [Sub url (option)], --url http://test.com http://test.com/board/news/")
     parser.add_argument("--agent", required=False, default=None, action='store_true', help="Random User-agent, --agent")
     parser.add_argument("--excloud", required=False, default=None, nargs='+', help="Input exclouded url, --excloud http://test.com/logout http://test.com/login")
-    parser.add_argument("--depth", required=False, default=3, help="Set parsing depth, --depth 4 (max = 10)")
+    parser.add_argument("--depth", required=False, default=3, type=int, help="Set parsing depth, --depth 4 (max = 10)")
     parser.add_argument("--nocontent", required=False, default=None, action='store_true', help="Whether to collect image, css, js url, --nocontent")
     parser.add_argument("--timeout", required=False, type=int, default=10, help="Set timeout. Default=10s, --timeout [time]")
     
-    return parser.parse_args()
+    arg = parser.parse_args()
+    
+    if arg.depth > 10:
+        print("[!] Depth max value is 10.")
+        exit()
+    
+    return arg
 
 # Generate fake user-agent
 def generateUserAgent():
@@ -66,8 +74,7 @@ def request(url, header):
 # parameter: bs >> beautifulSoup object (type = object)
 #            arg >> user defined command 
 #            url_table >> this variable stores all url list (type = list)
-#            url >> user defined url (type = string)
-def url_parser(bs, arg, url_table, url):
+def url_parser(bs, arg, url_table):
     tag_list = {"a" : "href", "img" : "src", "iframe" : "src", "form" : "action", "script" : "src", "link" : "href"}
     result_list = list()
     
@@ -89,7 +96,7 @@ def url_parser(bs, arg, url_table, url):
                 continue
             
             if link[0] == '/' or link[0] == '?':
-                result_list.append(url + link)
+                result_list.append(arg.url + link)
             else:
                 result_list.append(link)
     
@@ -106,7 +113,7 @@ def insertData(data):
     node = Node()
     for d in data:
         node.insert(d, None, None)
-        
+     
     return node
 
 def showToHTML(url_table):
@@ -121,25 +128,54 @@ def showToHTML(url_table):
             {}
         </body>
     </html>
-    '''.format("<br>".join(url_table))
+    '''.format(url_table.replace("\n\n", "<br>"))
     
     f = open("./result.html", "w")
-    # data = template.encode("utf8")
     f.write(template)
     f.close()
 
-def nodeToString(node):
-    result = list()
+def nodeToList(node):
+    result = ''
         
     for index in range(node.getLength()):
-        result.append(node.getData(index))
-        
+        # result += node.getData(index)["url"] + "       " + str(node.getData(index)["status_code"]) + "\n"
+        result += node.getData(index)["url"] + "\n\n"
     for index in range(node.getLength()):
         link = node.getData(index)['link']
         if link is not None:
-            result.append(nodeToString(link))
+            result += nodeToList(link)
     
     return result
+    
+def nodeTravel(node, bs, arg, url_table, count, max_depth):
+    if count < max_depth:
+        for index in range(node.getLength()):
+            d = node.getData(index)
+            parsed_uri_1 = urlparse(d["url"]).netloc
+            parsed_uri_2 = urlparse(user_url).netloc
+            
+            # Ohter domain do not crawl.
+            if parsed_uri_1 != parsed_uri_2:
+                continue
+            
+            r = request(d["url"], header)
+            
+            # Check recived response
+            if r is None:
+                continue
+            
+            status_code = r.status_code
+            bs = bs4.BeautifulSoup(r.text, "html.parser")
+            node_link, url_table = url_parser(bs, arg, url_table)
+            node.modifyData(index, "link", node_link)
+            node.modifyData(index, "status_code", status_code)
+        
+        for index in range(node.getLength()):
+            link = node.getData(index)["link"]
+            
+            if link is not None:
+                count += 1 
+                nodeTravel(link, bs, arg, url_table, count, max_depth)
     
 if __name__ == "__main__":
     url_table = list()
@@ -148,45 +184,26 @@ if __name__ == "__main__":
     
     header = ''
     
+    # check if use fake user-agent
     if arg.agent is not None:
         header = {"User-agent" : generateUserAgent()}
-    print("[*] URL crawling in {}".format(user_url))
-    r = request(user_url, header)
+    print("[*] URL crawling...")
+    r = request(arg.url, header)
     
+    # Check recived response
     if r is None:
         exit()
     bs = bs4.BeautifulSoup(r.text, "html.parser")
-    node, url_table = url_parser(bs, arg, url_table, user_url)
+    root, url_table = url_parser(bs, arg, url_table)
     
-    for index in range(node.getLength()):
-        
-        d = node.getData(index)
-        
-        # print(d["url"], user_url)
-        parsed_uri_1 = urlparse(d["url"]).netloc
-        parsed_uri_2 = urlparse(user_url).netloc
-        
-        if parsed_uri_1 != parsed_uri_2:
-            continue
-        r = request(d["url"], header)
-        
-        if r is None:
-            continue
-        status_code = r.status_code
-        bs = bs4.BeautifulSoup(r.text, "html.parser")
-        node_link, url_table = url_parser(bs, arg, url_table, user_url)
-        
-        node.modifyData(index, "link", node_link)
-        node.modifyData(index, "status_code", status_code)
+    # node = root
+    max_depth = arg.depth
     
-    showToHTML(url_table)
+    nodeTravel(root, bs, arg, url_table, 0, max_depth)
+        
+    result = nodeToList(root)
+    showToHTML(result)
     
-    result = nodeToString(node)
-    
-    for i in result:
-        print(i["url"] + " " + i["status_code"])
-    
-    # f = open("./test.txt", "a")
-    # data = "\n".join(url_table).encode("utf8")
-    # f.write(data+"\n\n\n")
-    # f.close()
+    f = open("./test.txt", "a")
+    f.write("\n".join(url_table))
+    f.close()
